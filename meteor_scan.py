@@ -31,7 +31,9 @@ Description:
     Finally, use spatial cluster to merge all continuous frames
     cut them from the original video
 
-You'd better run it under linux (ubuntu is preferred)
+You'd better run it under Linux or MacOS(ubuntu is preferred)
+Windows is not supported, as the command /w os.system is written in a UNIX style
+Anyway, you can change them
 
 Directory structure:
 meteor_scan
