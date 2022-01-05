@@ -1,3 +1,51 @@
+# -*- coding: utf-8 -*-
+
+'''
+Meteor Scan 
+
+Author: Hu, Ying-Hao (hyinghao@hotmail.com)
+Version: 1.0.0
+Last modification date: 2022-01-05
+Copyright 2022 Hu, Ying-Hao
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+    http://www.apache.org/licenses/LICENSE-2.0
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+Description:
+    Leverage "outlier detection" approach to find out the meteors and their trails.
+    
+    Assume each input video is a continuous stream for the dark sky
+    As the sky background will rotate/shift slightly through the time, 
+    build a rolling average for each 32x32 piece within 2-3 seconds as the normal sample
+    
+    Then, check whether anything will happen through time,
+    which is abnormal from it's previous averaged normal sample
+    
+    Finally, use spatial cluster to merge all continuous frames
+    cut them from the original video
+
+You'd better run it under linux (ubuntu is preferred)
+
+Directory structure:
+meteor_scan
+    ├── meteor01.mp4
+    ├── meteor_scan.py
+    ├── dump
+    │   └── ...
+    ├── output
+    │   └── ...
+    └── scanned
+        └── ...
+
+'''
+
 import os
 import glob
 from PIL import Image, ImageDraw
@@ -7,7 +55,6 @@ import sys
 
 from sklearn.cluster import DBSCAN
 from concurrent.futures import ProcessPoolExecutor
-
 
 class MeteorScan:
     def __init__(self, nProcess):
