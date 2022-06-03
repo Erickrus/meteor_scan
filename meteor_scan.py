@@ -2,12 +2,10 @@
 
 '''
 Meteor Scan 
-
 Author: Hu, Ying-Hao (hyinghao@hotmail.com)
-Version: 1.0.0
-Last modification date: 2022-01-05
+Version: 2.0.0
+Last modification date: 2022-06-03
 Copyright 2022 Hu, Ying-Hao
-
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -17,7 +15,6 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
-
 Description:
     Leverage "outlier detection" approach to find out the meteors and their trails.
     
@@ -30,11 +27,9 @@ Description:
     
     Finally, use spatial cluster to merge all continuous frames
     cut them from the original video
-
 You'd better run it under Linux or MacOS(ubuntu is preferred)
 Windows is not supported, as the command /w os.system is written in a UNIX style
 Anyway, you can change them
-
 Directory structure:
 meteor_scan
     ├── meteor01.mp4
@@ -45,18 +40,65 @@ meteor_scan
     │   └── ...
     └── scanned
         └── ...
-
 '''
 
 import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+
 import glob
-from PIL import Image, ImageDraw
 import math
 import numpy as np
 import sys
+import pixellib
 
+from PIL import Image, ImageDraw, ImageEnhance
 from sklearn.cluster import DBSCAN
 from concurrent.futures import ProcessPoolExecutor
+from pixellib.semantic import semantic_segmentation
+
+si = semantic_segmentation()
+si.load_ade20k_model('deeplabv3_xception65_ade20k.h5')
+def generate_mask(filename):
+    print("find sky background area")
+    maskFilename = filename[:-4]+"_mask.png"
+    maskPasteFilename = filename[:-4]+"_maskPaste.png"
+    brightenFilename = filename[:-4]+"_brighten.png"
+    im = Image.open(filename)
+    enhancer = ImageEnhance.Brightness(im)
+
+    factor = 3 #gives original image
+    im_output = enhancer.enhance(factor)
+    im_output.save(brightenFilename)
+
+    size = im.size
+
+    a, res, output = si.segmentAsAde20k(brightenFilename, extract_segmented_objects=True, output_image_name=maskFilename)
+    os.system("rm %s" % brightenFilename)
+    lowerBound = size[1]
+
+    for i in range(len(res)):
+        if res[i]['class_name'] == 'sky':
+            mask = np.where(res[i]["masks"],0,255).astype(np.uint8)
+            maskPaste = np.where(res[i]["masks"],255,0).astype(np.uint8)
+
+
+            mask = Image.fromarray(mask)
+            mask = mask.resize(size)
+            mask2 = np.array(mask)
+
+            for j in reversed(range(size[1])):
+                if np.max(mask2[j,:]) == 0:
+                    lowerBound = j
+                    break
+            maskPaste = Image.fromarray(maskPaste)
+            maskPaste = maskPaste.resize(size)
+
+            im.paste(maskPaste,[0,0],mask)
+            mask.save(maskFilename)
+            maskPaste.save(maskPasteFilename)
+
+            return mask, lowerBound
+
 
 class MeteorScan:
     def __init__(self, nProcess):
@@ -67,85 +109,94 @@ class MeteorScan:
         self.rectColor = "red"
 
     def _extract(self, mp4Filename):
-        print("mkdir dump")
+        print("extract images")
+        # print("mkdir dump")
         os.system("mkdir dump")
-        print("mkdir scanned")
+        # print("mkdir scanned")
         os.system("mkdir scanned")
-        print("mkdir output")
+        # print("mkdir output")
         os.system("mkdir output")
-        print("rm -Rf dump/*")
+        # print("rm -Rf dump/*")
         os.system("rm -Rf dump/*")
         mp4R8Filename = mp4Filename.replace(".mp4", ".r%d.mp4" % self.fps)
         targetFilename = os.path.basename(mp4Filename.replace(".mp4","_%5d.png"))
-        print("ffmpeg -i %s -r %d %s " % (mp4Filename, self.fps, mp4R8Filename))
-        os.system("ffmpeg -i %s -r %d %s " % (mp4Filename, self.fps, mp4R8Filename))
-        print("ffmpeg -i %s dump/%s" %(mp4R8Filename, targetFilename))
-        os.system("ffmpeg -i %s dump/%s" %(mp4R8Filename, targetFilename))
-        print("rm -f %s " % mp4R8Filename)
-        os.system("rm -f %s " % mp4R8Filename)
+        if not os.path.exists(mp4R8Filename):
+            print("convert to %d fps" % self.fps)
+            # print("ffmpeg -hide_banner -loglevel error -i %s -r %d %s " % (mp4Filename, self.fps, mp4R8Filename))
+            os.system("ffmpeg -hide_banner -loglevel error -i %s -r %d %s " % (mp4Filename, self.fps, mp4R8Filename))
+       
+        print("dump video to images")
+        # print("ffmpeg -hide_banner -loglevel error -i %s dump/%s" %(mp4R8Filename, targetFilename))
+        os.system("ffmpeg -hide_banner -loglevel error -i %s dump/%s" %(mp4R8Filename, targetFilename))
+        #print("rm -f %s " % mp4R8Filename)
+        #os.system("rm -f %s " % mp4R8Filename)
 
 
         targetFilenamePattern = mp4Filename.replace(".mp4","_*.png")
         imFilenames = sorted(list(glob.glob("dump/%s" % targetFilenamePattern)))
-        
-        return imFilenames
 
-    def _mp_scan(self, srcImFilenames, mp4Filename, start, nSize):
+        mask, lowerBound = generate_mask(imFilenames[0])
+        
+        return imFilenames, lowerBound - 10
+
+    def _mp_scan(self, srcImFilenames, mp4Filename, start, nSize, lowerBound):
         size = None
         scanned = []
-        print("processing: "+mp4Filename)
+        maskFilename = srcImFilenames[0][:-4]+"_mask.png"
+        maskPasteFilename = srcImFilenames[0][:-4]+"_maskPaste.png"
+        mask = Image.open(maskFilename)
+        maskPaste = Image.open(maskPasteFilename)
+
+        # print("processing: "+mp4Filename)
         imFilenames = srcImFilenames[start:start+nSize]
         nImages = len(imFilenames)
-        # build backgrounds
-        if size == None:
-            size = Image.open(imFilenames[0]).size
-        grids = {}
-        for i in range(3*int(self.fps)):
-            imFilename = imFilenames[i]
-            im = Image.open(imFilename).convert("L")
-            im = np.array(im)
-            for x in range(size[0]//self.gridSize):
-                for y in range(size[1] //self.gridSize):
-                    gridId = "%d_%d" % (x, y)
-                    piece = im[y*self.gridSize:(y+1)*self.gridSize,x*self.gridSize:(x+1)*self.gridSize]
-                    if gridId in grids:
-                        grids[gridId].append(piece.tolist())
-                    else:
-                        grids[gridId] = [piece.tolist()]
 
-        
+        import cv2
+        lsd = cv2.createLineSegmentDetector(0)
+
         for i in range(nImages):
             imFilename = imFilenames[i]
-            print(imFilename)
+            if imFilename.find("_mask")>0:
+                continue
+            # print(imFilename)
             found = False
             imColor = Image.open(imFilename)
             draw = ImageDraw.Draw(imColor)
             im = Image.open(imFilename).convert("L")
-            im = np.array(im)
-            for x in range(size[0]//self.gridSize):
-                for y in range(size[1] //self.gridSize):
-                    gridId = "%d_%d" % (x, y)
-                    piece = im[y*self.gridSize:(y+1)*self.gridSize,x*self.gridSize:(x+1)*self.gridSize]
-                    v = np.array(grids[gridId])
-                    v = np.mean(v, axis=0)
-                    diff = (piece - v).max()
-                    totDiff = np.abs(piece - v)
-                    totDiff = totDiff[totDiff > diff - 20].size
+            #im.paste(maskPaste, [0,0], mask)
+            #im.save(imFilename[:-4]+"_masked.png")
 
-                    if diff > 52 and totDiff > 6:
-                        scanned.append(imFilename)
-                        print("%s,%d,%d" % (imFilename,x*self.gridSize,y*self.gridSize))
-                        draw.rectangle((x*self.gridSize,y*self.gridSize,(x+1)*self.gridSize,(y+1)*self.gridSize), outline =self.rectColor)
+            # img = cv2.imread(imFilename[:-4]+"_masked.png" ,0)
+            img = cv2.imread(imFilename ,0)
+            lsd = cv2.createLineSegmentDetector(0)
+            lines = lsd.detect(img)[0]
+            drawn_img = img
+            # print(type(lines), lines)
+            if type(lines) != type(None):
+                drawn_img = lsd.drawSegments(img,lines)
+                lines = np.squeeze(lines)
+                for j in range(lines.shape[0]):
+                    if lines[j][1] < lowerBound:
+
+                        dist = np.linalg.norm(lines[j,:2] - lines[j,2:])
+                        if dist <= 14:
+                            continue
+                        rawPosition = float(os.path.basename(imFilename)[:-4].split("_")[-1])
+                        print("detected meteor at %.1fs" % rawPosition)   # lines[j][1], lowerBound)
                         found = True
-                    del grids[gridId][0]
-                    grids[gridId].append(piece.tolist())
+                        scanned.append(imFilename)
+                        break
+            # os.system("rm %s" % (imFilename[:-4]+"_masked.png"))
+
+
             if found:
-                imColor.save(imFilename.replace("dump", "scanned"))
+                # imColor.save(imFilename.replace("dump", "scanned"))
+                cv2.imwrite(imFilename.replace("dump", "scanned"), drawn_img)
 
         return scanned
 
     def _scan(self, mp4Filename):
-        srcImFilenames = self._extract(mp4Filename)
+        srcImFilenames, lowerBound = self._extract(mp4Filename)
         nImages = len(srcImFilenames)
         batchSize = int(math.ceil(float(nImages) / float(self.nProcess)))
         futures = []
@@ -154,8 +205,8 @@ class MeteorScan:
                 startPos = i * batchSize
                 endPos = min((i+1) * batchSize, nImages)
                 nSize = endPos - startPos
-                print(nImages, i, startPos, nSize)
-                future = executor.submit(self._mp_scan, srcImFilenames, mp4Filename, startPos, nSize)
+                print("split: ", nImages, i, startPos, nSize)
+                future = executor.submit(self._mp_scan, srcImFilenames, mp4Filename, startPos, nSize, lowerBound)
                 futures.append(future)
 
             for i in range(self.nProcess):
@@ -173,19 +224,20 @@ class MeteorScan:
         dbscan = DBSCAN(eps=self.blankVideoLen*float(self.fps), min_samples=1)
         clusterLabels = dbscan.fit_predict(rawPositions)
         cuts = {}
-        for i in clusterLabels:
+        for i in range(len(clusterLabels)):
             if str(clusterLabels[i]) in cuts:
                 cuts[str(clusterLabels[i])].append(rawPositions[i][1] / float(self.fps))
             else:
                 cuts[str(clusterLabels[i])] = [rawPositions[i][1] / float(self.fps)]
+
 
         for cutPositions in cuts:
             startPos = int(np.array(cuts[cutPositions]).min()-self.blankVideoLen)
             endPos   = int(np.array(cuts[cutPositions]).max()+self.blankVideoLen)
 
             outputVideoFilename = "output/"+mp4Filename.replace(".mp4", "_"+str(cutPositions)+".mp4")
-            print("ffmpeg -y -i %s -ss %d -to %d -c copy %s" %(mp4Filename, startPos, endPos, outputVideoFilename))
-            os.system("ffmpeg -y -i %s -ss %d -to %d -c copy %s" %(mp4Filename, startPos, endPos, outputVideoFilename))
+            # print("ffmpeg -hide_banner -loglevel error -y -i %s -ss %d -to %d  -pix_fmt yuv420p -c:v h264 -c:a aac %s" %(mp4Filename, startPos, endPos, outputVideoFilename))
+            os.system("ffmpeg -hide_banner -loglevel error -y -i %s -ss %d -to %d -pix_fmt yuv420p -c:v h264 -c:a aac  %s" %(mp4Filename, startPos, endPos, outputVideoFilename))
 
     def scanAndCut(self, mp4Filename):
         self._scan(mp4Filename)
@@ -197,6 +249,3 @@ if __name__ == "__main__":
     if len(sys.argv)>2:
         nProcess = int(sys.argv[2])
     MeteorScan(nProcess = nProcess).scanAndCut(mp4Filename)
-    
-
-
