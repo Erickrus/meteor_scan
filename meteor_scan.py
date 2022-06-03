@@ -3,7 +3,7 @@
 '''
 Meteor Scan 
 Author: Hu, Ying-Hao (hyinghao@hotmail.com)
-Version: 2.0.0
+Version: 2.0.1
 Last modification date: 2022-06-03
 Copyright 2022 Hu, Ying-Hao
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -16,17 +16,23 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 Description:
-    Leverage "outlier detection" approach to find out the meteors and their trails.
-    
-    Assume each input video is a continuous stream for the dark sky
-    As the sky background will rotate/shift slightly through the time, 
-    build a rolling average for each 32x32 piece within 2-3 seconds as the normal sample
-    
-    Then, check whether anything will happen through time,
-    which is abnormal from it's previous averaged normal sample
+    The new approach basically leverage the semantic segmentation and
+    line segment detection to find out the meteors
+
+    line segment detection are used to figure out the meteors in the sky
+    The algorithm is based on opencv.
+
+    semantic segmentations are used to figure out the sky area,
+    The algorithm is based on pixellib
+    as there're noises on the ground frequently. So basically, a lower bound
+    is set up to filter out the detection of line segments
     
     Finally, use spatial cluster to merge all continuous frames
     cut them from the original video
+
+    This approach is faster, however, it is not 100% for all cases.
+    video quality is crucial to this problem, high fidelity is must
+
 You'd better run it under Linux or MacOS(ubuntu is preferred)
 Windows is not supported, as the command /w os.system is written in a UNIX style
 Anyway, you can change them
