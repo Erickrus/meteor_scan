@@ -3,8 +3,8 @@
 '''
 Meteor Scan 
 Author: Hu, Ying-Hao (hyinghao@hotmail.com)
-Version: 2.0.1
-Last modification date: 2022-06-03
+Version: 2.1.1
+Last modification date: 2022-06-04
 Copyright 2022 Hu, Ying-Hao
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -51,6 +51,7 @@ meteor_scan
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
+import cv2
 import glob
 import math
 import numpy as np
@@ -62,35 +63,44 @@ from sklearn.cluster import DBSCAN
 from concurrent.futures import ProcessPoolExecutor
 from pixellib.semantic import semantic_segmentation
 
-si = semantic_segmentation()
-si.load_ade20k_model('deeplabv3_xception65_ade20k.h5')
+
 def generate_mask(filename):
     print("find sky background area")
+
+    si = semantic_segmentation()
+    si.load_ade20k_model('deeplabv3_xception65_ade20k.h5')
+
+    # define filenames
     maskFilename = filename[:-4]+"_mask.png"
     maskPasteFilename = filename[:-4]+"_maskPaste.png"
     brightenFilename = filename[:-4]+"_brighten.png"
+
+    # generate a brightened image
     im = Image.open(filename)
     enhancer = ImageEnhance.Brightness(im)
-
     factor = 3 #gives original image
     im_output = enhancer.enhance(factor)
     im_output.save(brightenFilename)
 
     size = im.size
 
-    a, res, output = si.segmentAsAde20k(brightenFilename, extract_segmented_objects=True, output_image_name=maskFilename)
+    # using semantic segmentation
+    a, res, output = si.segmentAsAde20k(
+        brightenFilename, 
+        extract_segmented_objects=True, 
+        output_image_name=maskFilename
+    )
     os.system("rm %s" % brightenFilename)
     lowerBound = size[1]
 
+    # try to figure out category of the largest area as a candidate for sky
+    # final mask = mask of largest area | mask of sky
     area = []
     skyId = -1
     for i in range(len(res)):
-        # print(i, res[i]['class_name'], np.sum(res[i]["masks"].astype(np.uint)))
         area.append(np.sum(res[i]["masks"].astype(np.uint)))
         if res[i]['class_name'] == 'sky':
             skyId = i
-
-
     mxId = np.argmax(np.array(area))
     if (skyId != -1):
         m = res[skyId]["masks"]
@@ -103,15 +113,19 @@ def generate_mask(filename):
     mask = np.where(m,0,255).astype(np.uint8)
     maskPaste = np.where(m,255,0).astype(np.uint8)
 
-
     mask = Image.fromarray(mask)
     mask = mask.resize(size)
     mask2 = np.array(mask)
 
+    # scan the mask horizontally from the bottom
+    # figure out where the sky starts from the horizon
     for j in reversed(range(size[1])):
         if np.max(mask2[j,:]) == 0:
             lowerBound = j
             break
+
+    # save them to the dump folder, 
+    # for parallel calculate in other processes
     maskPaste = Image.fromarray(maskPaste)
     maskPaste = maskPaste.resize(size)
 
@@ -173,8 +187,19 @@ class MeteorScan:
         imFilenames = srcImFilenames[start:start+nSize]
         nImages = len(imFilenames)
 
-        import cv2
         lsd = cv2.createLineSegmentDetector(0)
+
+        # build cyclic cache for images
+        npCyclicCache = np.zeros([int(self.fps*3), mask.size[1], mask.size[0]])
+        for i in range(nImages):
+            imFilename = imFilenames[i]
+            if imFilename.find("_mask")>0:
+                continue
+            npIm = np.array(Image.open(imFilename).convert("L"))
+            for j in range(self.fps * 3):
+                npCyclicCache[j] = npIm
+            break
+
 
         for i in range(nImages):
             imFilename = imFilenames[i]
@@ -185,26 +210,49 @@ class MeteorScan:
             imColor = Image.open(imFilename)
             draw = ImageDraw.Draw(imColor)
             im = Image.open(imFilename).convert("L")
-            #im.paste(maskPaste, [0,0], mask)
+            im.paste(maskPaste, [0,0], mask)
+
+            # get average before update take place
+            npAveragedCyclicCache = np.average(npCyclicCache, axis=0)
+            npIm = np.array(im)
+            npCyclicCache[i % int(self.fps*3)] = npIm
+
             #im.save(imFilename[:-4]+"_masked.png")
 
             # img = cv2.imread(imFilename[:-4]+"_masked.png" ,0)
             img = cv2.imread(imFilename ,0)
             lsd = cv2.createLineSegmentDetector(0)
             lines = lsd.detect(img)[0]
+
+            def line_to_rect(aLine):
+                xs = list(sorted([int(aLine[0]), int(aLine[2])]))
+                ys = list(sorted([int(aLine[1]), int(aLine[3])]))
+                return xs[0], ys[0], xs[1], ys[1]
+
             drawn_img = img
-            # print(type(lines), lines)
             if type(lines) != type(None):
                 drawn_img = lsd.drawSegments(img,lines)
                 lines = np.squeeze(lines)
                 for j in range(lines.shape[0]):
+                    # filter by its location
                     if lines[j][1] < lowerBound:
-
+                        # filter by line segment length
                         dist = np.linalg.norm(lines[j,:2] - lines[j,2:])
                         if dist <= 14:
                             continue
+                        
+                        # filter by lightness changes
+                        x1, y1, x2, y2 = line_to_rect(lines[j])
+                        x1 = max(0, x1-1)
+                        x2 = min(im.size[0]-1, x2+1)
+                        y1 = max(0, y1-1)
+                        y2 = min(im.size[1]-1, y2+1)
+                        diff = np.abs(npAveragedCyclicCache[y1:y2,x1:x2] - npIm[y1:y2,x1:x2]).max()
+                        if diff < 40:
+                            continue
+
                         rawPosition = float(os.path.basename(imFilename)[:-4].split("_")[-1])
-                        print("detected meteor at %.1fs" % rawPosition/self.fps)   # lines[j][1], lowerBound)
+                        print("detected meteor at %.2fs , lightness diff: %.2f, %s" % (rawPosition/self.fps, diff, str(line_to_rect(lines[j]))))
                         found = True
                         scanned.append(imFilename)
                         break
