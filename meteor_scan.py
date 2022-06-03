@@ -19,18 +19,18 @@ Description:
     The new approach basically leverage the semantic segmentation and
     line segment detection to find out the meteors
 
-    line segment detection are used to figure out the meteors in the sky
+    line segment detection is used to figure out the meteors in the sky
     The algorithm is based on opencv.
 
-    semantic segmentations are used to figure out the sky area,
-    The algorithm is based on pixellib
-    as there're noises on the ground frequently. So basically, a lower bound
+    semantic segmentation is used to figure out the sky area,
+    The algorithm is based on pixellib.
+    As there're noises on the ground frequently. So basically, a lower bound
     is set up to filter out the detection of line segments
     
     Finally, use spatial cluster to merge all continuous frames
     cut them from the original video
 
-    This approach is faster, however, it is not 100% for all cases.
+    This approach is faster, however, it cannot cover 100% for all cases.
     video quality is crucial to this problem, high fidelity is must
 
 You'd better run it under Linux or MacOS(ubuntu is preferred)
