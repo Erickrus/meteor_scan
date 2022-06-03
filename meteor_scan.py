@@ -76,28 +76,44 @@ def generate_mask(filename):
     os.system("rm %s" % brightenFilename)
     lowerBound = size[1]
 
+    area = []
+    skyId = -1
     for i in range(len(res)):
+        # print(i, res[i]['class_name'], np.sum(res[i]["masks"].astype(np.uint)))
+        area.append(np.sum(res[i]["masks"].astype(np.uint)))
         if res[i]['class_name'] == 'sky':
-            mask = np.where(res[i]["masks"],0,255).astype(np.uint8)
-            maskPaste = np.where(res[i]["masks"],255,0).astype(np.uint8)
+            skyId = i
 
 
-            mask = Image.fromarray(mask)
-            mask = mask.resize(size)
-            mask2 = np.array(mask)
+    mxId = np.argmax(np.array(area))
+    if (skyId != -1):
+        m = res[skyId]["masks"]
+        if mxId != skyId:
+            m = m | res[mxId]["masks"]
+    else:
+        m = res[mxId]["masks"]
 
-            for j in reversed(range(size[1])):
-                if np.max(mask2[j,:]) == 0:
-                    lowerBound = j
-                    break
-            maskPaste = Image.fromarray(maskPaste)
-            maskPaste = maskPaste.resize(size)
 
-            im.paste(maskPaste,[0,0],mask)
-            mask.save(maskFilename)
-            maskPaste.save(maskPasteFilename)
+    mask = np.where(m,0,255).astype(np.uint8)
+    maskPaste = np.where(m,255,0).astype(np.uint8)
 
-            return mask, lowerBound
+
+    mask = Image.fromarray(mask)
+    mask = mask.resize(size)
+    mask2 = np.array(mask)
+
+    for j in reversed(range(size[1])):
+        if np.max(mask2[j,:]) == 0:
+            lowerBound = j
+            break
+    maskPaste = Image.fromarray(maskPaste)
+    maskPaste = maskPaste.resize(size)
+
+    im.paste(maskPaste,[0,0],mask)
+    mask.save(maskFilename)
+    maskPaste.save(maskPasteFilename)
+
+    return mask, lowerBound
 
 
 class MeteorScan:
@@ -182,7 +198,7 @@ class MeteorScan:
                         if dist <= 14:
                             continue
                         rawPosition = float(os.path.basename(imFilename)[:-4].split("_")[-1])
-                        print("detected meteor at %.1fs" % rawPosition)   # lines[j][1], lowerBound)
+                        print("detected meteor at %.1fs" % rawPosition/self.fps)   # lines[j][1], lowerBound)
                         found = True
                         scanned.append(imFilename)
                         break
