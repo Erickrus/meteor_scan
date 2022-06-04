@@ -3,7 +3,7 @@
 '''
 Meteor Scan 
 Author: Hu, Ying-Hao (hyinghao@hotmail.com)
-Version: 2.1.1
+Version: 2.2.0
 Last modification date: 2022-06-04
 Copyright 2022 Hu, Ying-Hao
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -65,7 +65,7 @@ from pixellib.semantic import semantic_segmentation
 
 
 def generate_mask(filename):
-    print("find sky background area")
+    print("\n3. find sky background")
 
     si = semantic_segmentation()
     si.load_ade20k_model('deeplabv3_xception65_ade20k.h5')
@@ -145,28 +145,36 @@ class MeteorScan:
         self.rectColor = "red"
 
     def _extract(self, mp4Filename):
-        print("extract images")
-        # print("mkdir dump")
-        os.system("mkdir dump")
-        # print("mkdir scanned")
-        os.system("mkdir scanned")
-        # print("mkdir output")
-        os.system("mkdir output")
-        # print("rm -Rf dump/*")
-        os.system("rm -Rf dump/*")
-        mp4R8Filename = mp4Filename.replace(".mp4", ".r%d.mp4" % self.fps)
-        targetFilename = os.path.basename(mp4Filename.replace(".mp4","_%5d.png"))
-        if not os.path.exists(mp4R8Filename):
-            print("convert to %d fps" % self.fps)
-            # print("ffmpeg -hide_banner -loglevel error -i %s -r %d %s " % (mp4Filename, self.fps, mp4R8Filename))
-            os.system("ffmpeg -hide_banner -loglevel error -i %s -r %d %s " % (mp4Filename, self.fps, mp4R8Filename))
-       
-        print("dump video to images")
-        # print("ffmpeg -hide_banner -loglevel error -i %s dump/%s" %(mp4R8Filename, targetFilename))
-        os.system("ffmpeg -hide_banner -loglevel error -i %s dump/%s" %(mp4R8Filename, targetFilename))
-        #print("rm -f %s " % mp4R8Filename)
-        #os.system("rm -f %s " % mp4R8Filename)
+        print("""1. create directories
+Following sub-directories will be created:
+meteor_scan
+    ├── dump
+    │   └── ...
+    ├── output
+    │   └── ...
+    └── scanned
+        └── ...""")
+        os.system("mkdir dump 2> /dev/null ")
+        os.system("mkdir scanned 2> /dev/null")
+        os.system("mkdir output 2> /dev/null")
+        print("\n2. extract video to images")
+        cleanUpInd = "y"
+        cleanUpInd = input("clean up the previous extraction [y/N] ? ").strip().lower()
 
+        if cleanUpInd == "y":
+            os.system("rm -Rf dump/*")
+            mp4R8Filename = mp4Filename.replace(".mp4", ".r%d.mp4" % self.fps)
+            targetFilename = os.path.basename(mp4Filename.replace(".mp4","_%5d.png"))
+            #if not os.path.exists(mp4R8Filename):
+            print("2.1. convert video to %d fps with ffmpeg" % self.fps)
+            # print("ffmpeg -y -hide_banner -loglevel error -i %s -r %d %s " % (mp4Filename, self.fps, mp4R8Filename))
+            os.system("ffmpeg -y -hide_banner -loglevel error -i %s -r %d %s " % (mp4Filename, self.fps, mp4R8Filename))
+       
+            print("2.2. dump video to images with ffmpeg")
+            # print("ffmpeg -y -hide_banner -loglevel error -i %s dump/%s" %(mp4R8Filename, targetFilename))
+            os.system("ffmpeg -y -hide_banner -loglevel error -i %s dump/%s" %(mp4R8Filename, targetFilename))
+            #print("rm -f %s " % mp4R8Filename)
+            #os.system("rm -f %s " % mp4R8Filename)
 
         targetFilenamePattern = mp4Filename.replace(".mp4","_*.png")
         imFilenames = sorted(list(glob.glob("dump/%s" % targetFilenamePattern)))
@@ -237,8 +245,8 @@ class MeteorScan:
                     # filter by its location
                     if lines[j][1] < lowerBound:
                         # filter by line segment length
-                        dist = np.linalg.norm(lines[j,:2] - lines[j,2:])
-                        if dist <= 14:
+                        meteorLen = np.linalg.norm(lines[j,:2] - lines[j,2:])
+                        if meteorLen <= 14:
                             continue
                         
                         # filter by lightness changes
@@ -247,12 +255,16 @@ class MeteorScan:
                         x2 = min(im.size[0]-1, x2+1)
                         y1 = max(0, y1-1)
                         y2 = min(im.size[1]-1, y2+1)
-                        diff = np.abs(npAveragedCyclicCache[y1:y2,x1:x2] - npIm[y1:y2,x1:x2]).max()
-                        if diff < 40:
+                        lightnessDiff = np.abs(npAveragedCyclicCache[y1:y2,x1:x2] - npIm[y1:y2,x1:x2]).max()
+                        if lightnessDiff < 40:
                             continue
 
                         rawPosition = float(os.path.basename(imFilename)[:-4].split("_")[-1])
-                        print("detected meteor at %.2fs , lightness diff: %.2f, %s" % (rawPosition/self.fps, diff, str(line_to_rect(lines[j]))))
+                        print("detected at: %7.2fs, position: %26s" % (
+                            rawPosition/self.fps, 
+                            str(list(line_to_rect(lines[j])))#, 
+                            # lightnessDiff
+                        ))
                         found = True
                         scanned.append(imFilename)
                         break
@@ -269,13 +281,15 @@ class MeteorScan:
         srcImFilenames, lowerBound = self._extract(mp4Filename)
         nImages = len(srcImFilenames)
         batchSize = int(math.ceil(float(nImages) / float(self.nProcess)))
+        print("\n4. detect following %d split(s) in parallel" % self.nProcess)
         futures = []
         with ProcessPoolExecutor(max_workers=self.nProcess) as executor:
+            print("       %8s %8s %8s %8s"% ("frames", "splitId", "startPos", "splitFrames"))
             for i in range(self.nProcess):
                 startPos = i * batchSize
                 endPos = min((i+1) * batchSize, nImages)
                 nSize = endPos - startPos
-                print("split: ", nImages, i, startPos, nSize)
+                print("split: %8d %8d %8d %8d"% (nImages, i, startPos, nSize))
                 future = executor.submit(self._mp_scan, srcImFilenames, mp4Filename, startPos, nSize, lowerBound)
                 futures.append(future)
 
@@ -283,6 +297,7 @@ class MeteorScan:
                 futures[i].result()
 
     def _cut(self, mp4Filename):
+        print("\n5. cut videos")
         targetFilenamePattern = mp4Filename.replace(".mp4","_*.png")
         imFilenames = sorted(list(glob.glob("scanned/%s" % targetFilenamePattern)))
 
@@ -306,16 +321,28 @@ class MeteorScan:
             endPos   = int(np.array(cuts[cutPositions]).max()+self.blankVideoLen)
 
             outputVideoFilename = "output/"+mp4Filename.replace(".mp4", "_"+str(cutPositions)+".mp4")
-            # print("ffmpeg -hide_banner -loglevel error -y -i %s -ss %d -to %d  -pix_fmt yuv420p -c:v h264 -c:a aac %s" %(mp4Filename, startPos, endPos, outputVideoFilename))
+            print("ffmpeg -hide_banner -loglevel error -y -i %s -ss %d -to %d  -pix_fmt yuv420p -c:v h264 -c:a aac %s" %(mp4Filename, startPos, endPos, outputVideoFilename))
             os.system("ffmpeg -hide_banner -loglevel error -y -i %s -ss %d -to %d -pix_fmt yuv420p -c:v h264 -c:a aac  %s" %(mp4Filename, startPos, endPos, outputVideoFilename))
 
     def scanAndCut(self, mp4Filename):
+        print("""
+It is highly recommended to input video with size around 1920x1080
+High resolution slows down the entire process.
+""")
         self._scan(mp4Filename)
         self._cut(mp4Filename)
+        print("\n6. detection completed!")
+        print("cut videos are saved to \"output\" directory")
 
 if __name__ == "__main__":
+    print("meteor_scan v2.2.0")
     mp4Filename = sys.argv[1]
     nProcess = 1
     if len(sys.argv)>2:
         nProcess = int(sys.argv[2])
+
+    print("filename: %s"% mp4Filename)
+    print("split(s): %d"% nProcess)
+
     MeteorScan(nProcess = nProcess).scanAndCut(mp4Filename)
+
