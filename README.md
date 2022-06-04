@@ -19,7 +19,7 @@ python3 meteor_scan.py meteor01.mp4
 
 If you want to speed up, add parallelism in the end (e.g. 4)
 ```shell
-$ python3.9 meteor_scan.py C.mp4 4
+$ python3 meteor_scan.py C.mp4 4
 meteor_scan v2.2.0
 filename: C.mp4
 split(s): 4
