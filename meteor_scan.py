@@ -6,6 +6,7 @@ Author: Hu, Ying-Hao (hyinghao@hotmail.com)
 Version: 2.2.0
 Last modification date: 2022-06-04
 Copyright 2022 Hu, Ying-Hao
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -336,6 +337,17 @@ High resolution slows down the entire process.
 
 if __name__ == "__main__":
     print("meteor_scan v2.2.0")
+    print("""
+                    ▄▄▄▄
+       ▀██       ▄▄    ██     █    ▄█        ▄▄   ▄█▄   ██
+  ██    ▄▄▄      ██▄█ ▄█▀    ▄█▄   █  ▄      ▀▀▀    █   ██
+      ▄██▀        ▀██▄▀    ▄██▀▀ ▄█▀▄▄▀██▄        ▄ █ █▄██           ▄▄▀
+▄▄    ██▄██      ▄█▀▄██▀  ▀▀██ ▄ ▀ ▀▀▀ ▄ ▀  ██  █▀█ █ █ ██      ▄▄▄█▀
+██   ███  ▄▄   ▄███▀▀█▄    █▀█    ▄ █  █▀       ▀██▀█   ██  ▄▄█▀▀
+█ ▄  ▄█▀████   ▀▀  ▄███▀    ██   ▀▀  ▄█▀      ▄ ▄███▄▄  ██  ▀▀
+██▀  █▀ ▀  ▀▄▄     ▄█▀      ██   ▄▄███████▄ ▄█▀ ▀▀  ▀▀▀ ██
+            ▀▀    ██████▀                   ▀           ██
+""")
     mp4Filename = sys.argv[1]
     nProcess = 1
     if len(sys.argv)>2:
@@ -345,4 +357,3 @@ if __name__ == "__main__":
     print("split(s): %d"% nProcess)
 
     MeteorScan(nProcess = nProcess).scanAndCut(mp4Filename)
-
